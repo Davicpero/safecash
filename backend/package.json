@@ -1,0 +1,41 @@
+{
+  "name": "safecash-api",
+  "version": "1.0.0",
+  "description": "SafeCash - Core Engine de Tesouraria (API REST)",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "db:migrate": "node --env-file-if-exists=.env src/database/cli.js migrate",
+    "db:rollback": "node --env-file-if-exists=.env src/database/cli.js rollback",
+    "db:seed": "node --env-file-if-exists=.env src/database/cli.js seed",
+    "db:reset": "node --env-file-if-exists=.env src/database/cli.js reset",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.2.0",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.5",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "knex": "^3.3.0",
+    "morgan": "^1.12.1",
+    "pg": "^8.23.1",
+    "swagger-ui-express": "^5.0.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "supertest": "^7.3.2",
+    "vitest": "^5.1.1"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  }
+}

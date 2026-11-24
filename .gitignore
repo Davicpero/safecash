@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+*.db
+*.db-shm
+*.db-wal
+backend/data/
+.DS_Store
+*.log
+.vercel
+.netlify
+test-results/
+playwright-report/

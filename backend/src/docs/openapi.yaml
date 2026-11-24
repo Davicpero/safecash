@@ -1,0 +1,536 @@
+openapi: 3.1.0
+info:
+  title: SafeCash API — Core Engine de Tesouraria
+  version: 1.0.0
+  description: |
+    API REST do sistema de tesouraria da SafeCash.
+
+    **Regras de integridade**
+    - Valores em reais trafegam como texto decimal (`"2000.00"`) e são guardados em **centavos inteiros**.
+    - `amount` é sempre **positivo**; o sentido vem de `type` (`INCOME` = entrada, `EXPENSE` = saída).
+    - `DELETE` faz **soft delete**: o registro é marcado como excluído e continua no banco (Regra de Ouro, H1).
+    - Toda escrita gera uma linha na **trilha de auditoria** com o estado antes e depois.
+    - `PUT` exige o campo `version` (trava otimista). Versão desatualizada → `409 VERSION_CONFLICT`.
+    - Envie o header `Idempotency-Key` no `POST` para que um reenvio não duplique o lançamento.
+
+    **Como testar aqui:** faça `POST /api/auth/login`, copie o `token` e clique em **Authorize**.
+    Usuários de demonstração: `admin@safecash.dev / Admin@123`, `operador@safecash.dev / Operador@123`, `auditor@safecash.dev / Auditor@123`.
+servers:
+  - url: /
+    description: Mesmo servidor
+tags:
+  - name: Auth
+  - name: Transações
+  - name: Dashboard
+  - name: Relatórios
+  - name: Auditoria
+  - name: Usuários
+  - name: Sistema
+security:
+  - bearerAuth: []
+
+paths:
+  /api/health:
+    get:
+      tags: [Sistema]
+      summary: Verifica se a API e o banco estão no ar
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example: { status: ok, database: ok, time: '2026-11-24T12:00:00.000Z' }
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login (retorna JWT)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: operador@safecash.dev }
+                password: { type: string, example: Operador@123 }
+      responses:
+        '200':
+          description: Autenticado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401':
+          description: E-mail ou senha incorretos (`INVALID_CREDENTIALS`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: Muitas tentativas (`TOO_MANY_ATTEMPTS`)
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Usuário logado e suas permissões
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/events:
+    get:
+      tags: [Sistema]
+      summary: Stream de eventos em tempo real (Server-Sent Events)
+      description: |
+        Mantém a conexão aberta e envia `event: transactions:changed` sempre que uma transação
+        é criada, editada, excluída ou restaurada. O frontend usa para atualizar o saldo na hora.
+      responses:
+        '200':
+          description: text/event-stream
+
+  /api/transactions:
+    get:
+      tags: [Transações]
+      summary: Listar transações (paginação, busca e filtros)
+      description: Permissão `transaction:read`. `status=deleted|all` exige `transaction:read-deleted` (ADMIN, AUDITOR).
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1, minimum: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 10, minimum: 1, maximum: 100 } }
+        - { name: search, in: query, description: Busca na descrição e na categoria, schema: { type: string } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TransactionType' } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: from, in: query, description: Data inicial AAAA-MM-DD, schema: { type: string, format: date } }
+        - { name: to, in: query, description: Data final AAAA-MM-DD, schema: { type: string, format: date } }
+        - { name: status, in: query, schema: { type: string, enum: [active, deleted, all], default: active } }
+        - { name: sort, in: query, schema: { type: string, enum: [date, amount, description, createdAt], default: date } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200':
+          description: Página de transações
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Transaction' }
+                  meta: { $ref: '#/components/schemas/PageMeta' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Transações]
+      summary: Criar transação
+      description: Permissão `transaction:create` (ADMIN, OPERATOR).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: UUID gerado pelo cliente. Reenvio com a mesma chave devolve o lançamento original (200 + header `Idempotent-Replayed`).
+          schema: { type: string, example: 3f1c2b7e-5d8a-4c11-9a0e-2b6f7d9e1a44 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransactionInput' }
+            example:
+              description: Pagamento de Aluguel
+              amount: '2000.00'
+              type: EXPENSE
+              category: Aluguel
+              date: '2026-11-05'
+              notes: Referente a novembro
+      responses:
+        '201':
+          description: Criada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Transaction' }
+        '200': { description: Reenvio idempotente (nenhum lançamento novo foi criado) }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/transactions/categories:
+    get:
+      tags: [Transações]
+      summary: Categorias em uso (para filtros e autocompletar)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example: { data: [Aluguel, Clientes, Impostos] }
+
+  /api/transactions/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: integer } }
+    get:
+      tags: [Transações]
+      summary: Detalhar transação
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Transaction' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Transações]
+      summary: Editar transação (com trava otimista)
+      description: Permissão `transaction:update`. Envie a `version` que você leu; se outra pessoa salvou antes, a resposta é 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/TransactionInput'
+                - type: object
+                  required: [version]
+                  properties:
+                    version: { type: integer, example: 1 }
+      responses:
+        '200':
+          description: Atualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Transaction' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: '`VERSION_CONFLICT` ou `TRANSACTION_DELETED`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Transações]
+      summary: Excluir transação (SOFT DELETE)
+      description: |
+        Permissão `transaction:delete`. **Não apaga do banco**: preenche `deletedAt` e `deletedBy`,
+        some do saldo e da listagem padrão e fica visível para auditoria.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, example: Lançamento em duplicidade }
+      responses:
+        '200': { description: Marcada como excluída }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: '`ALREADY_DELETED`' }
+
+  /api/transactions/{id}/restore:
+    patch:
+      tags: [Transações]
+      summary: Restaurar transação excluída
+      description: Permissão `transaction:restore` (ADMIN).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: Restaurada }
+        '409': { description: '`NOT_DELETED`' }
+
+  /api/transactions/{id}/history:
+    get:
+      tags: [Auditoria]
+      summary: Trilha de auditoria de uma transação
+      description: Permissão `audit:read` (ADMIN, AUDITOR). Mostra quem criou, alterou, excluiu e restaurou, com antes/depois.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditEntry' }
+
+  /api/dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Saldo atual e totais do período
+      description: '`balance` é sempre o saldo acumulado; `income`, `expense`, `net` e `count` respeitam `from`/`to`.'
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example:
+                data:
+                  balance: { amount: '45210.37', amountCents: 4521037 }
+                  income: { amount: '18500.00', amountCents: 1850000 }
+                  expense: { amount: '2000.00', amountCents: 200000 }
+                  net: { amount: '16500.00', amountCents: 1650000 }
+                  count: 2
+                  generatedAt: '2026-11-24T12:00:00.000Z'
+
+  /api/dashboard/monthly:
+    get:
+      tags: [Dashboard]
+      summary: Entradas x saídas por mês
+      parameters:
+        - { name: months, in: query, schema: { type: integer, default: 6, minimum: 1, maximum: 24 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example:
+                data:
+                  - { month: '2026-10', incomeCents: 2500000, expenseCents: 1450000, netCents: 1050000 }
+
+  /api/dashboard/categories:
+    get:
+      tags: [Dashboard]
+      summary: Total por categoria
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TransactionType' } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example:
+                data:
+                  - { category: Pessoal, totalCents: 920000, total: '9200.00', count: 1, percent: 61.3 }
+
+  /api/reports/transactions.csv:
+    get:
+      tags: [Relatórios]
+      summary: Exportar extrato em CSV (Excel)
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/TransactionType' } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: includeDeleted, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Arquivo CSV separado por ponto e vírgula
+          content:
+            text/csv: {}
+
+  /api/audit:
+    get:
+      tags: [Auditoria]
+      summary: Trilha de auditoria geral
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+        - { name: entity, in: query, schema: { type: string, enum: [transaction, user, auth] } }
+        - { name: action, in: query, schema: { type: string, enum: [CREATE, UPDATE, DELETE, RESTORE, LOGIN, LOGIN_FAILED] } }
+        - { name: userId, in: query, schema: { type: integer } }
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/users:
+    get:
+      tags: [Usuários]
+      summary: Listar usuários (ADMIN)
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Usuários]
+      summary: Criar usuário (ADMIN)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, description: Letras e números }
+                role: { type: string, enum: [ADMIN, OPERATOR, AUDITOR], default: OPERATOR }
+      responses:
+        '201': { description: Criado }
+        '409': { description: '`EMAIL_IN_USE`' }
+
+  /api/users/{id}:
+    patch:
+      tags: [Usuários]
+      summary: Alterar nome, perfil ou ativar/desativar (ADMIN)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                role: { type: string, enum: [ADMIN, OPERATOR, AUDITOR] }
+                active: { type: boolean }
+      responses:
+        '200': { description: Atualizado }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    TransactionType:
+      type: string
+      enum: [INCOME, EXPENSE]
+      description: INCOME = entrada, EXPENSE = saída
+
+    Person:
+      type: [object, 'null']
+      properties:
+        id: { type: integer }
+        name: { type: string }
+
+    TransactionInput:
+      type: object
+      required: [description, amount, type, category, date]
+      additionalProperties: false
+      properties:
+        description: { type: string, minLength: 2, maxLength: 140 }
+        amount:
+          type: string
+          description: Valor absoluto, positivo, até 2 casas decimais. Aceita "2000.00", "2000,00" ou número.
+          example: '2000.00'
+        type: { $ref: '#/components/schemas/TransactionType' }
+        category: { type: string, minLength: 2, maxLength: 60 }
+        date: { type: string, format: date, example: '2026-11-05' }
+        notes: { type: [string, 'null'], maxLength: 500 }
+
+    Transaction:
+      type: object
+      properties:
+        id: { type: integer }
+        description: { type: string }
+        amount: { type: string, example: '2000.00' }
+        amountCents: { type: integer, example: 200000 }
+        type: { $ref: '#/components/schemas/TransactionType' }
+        category: { type: string }
+        date: { type: string, format: date }
+        notes: { type: [string, 'null'] }
+        version: { type: integer }
+        isDeleted: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        createdBy: { $ref: '#/components/schemas/Person' }
+        updatedAt: { type: [string, 'null'], format: date-time }
+        updatedBy: { $ref: '#/components/schemas/Person' }
+        deletedAt: { type: [string, 'null'], format: date-time }
+        deletedBy: { $ref: '#/components/schemas/Person' }
+
+    PageMeta:
+      type: object
+      properties:
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [ADMIN, OPERATOR, AUDITOR] }
+        permissions:
+          type: array
+          items: { type: string }
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        action: { type: string, enum: [CREATE, UPDATE, DELETE, RESTORE] }
+        reason: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/Person' }
+        before: { type: [object, 'null'] }
+        after: { type: [object, 'null'] }
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: VALIDATION_ERROR }
+            message: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+            requestId: { type: string }
+
+  responses:
+    ValidationError:
+      description: Dados inválidos (`VALIDATION_ERROR`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Dados inválidos.
+              details:
+                - { field: amount, message: 'O valor deve ser positivo. Use o tipo (entrada/saída) para indicar o sentido.' }
+              requestId: 6c1f0a9e-1b2c-4d5e-8f90-123456789abc
+    Unauthorized:
+      description: Token ausente, inválido ou expirado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Perfil sem permissão (`FORBIDDEN`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Não encontrado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

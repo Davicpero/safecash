@@ -1,0 +1,32 @@
+# Sobe PostgreSQL + API iguais à produção: docker compose up --build
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: safecash
+      POSTGRES_PASSWORD: safecash
+      POSTGRES_DB: safecash
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safecash"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      NODE_ENV: production
+      PORT: 3333
+      DB_CLIENT: pg
+      DATABASE_URL: postgres://safecash:safecash@db:5432/safecash
+      DATABASE_SSL: "false"
+      JWT_SECRET: troque-por-um-segredo-longo-e-aleatorio
+      CORS_ORIGIN: http://localhost:5173
+      SEED_ON_START: "true"
+    ports: ["3333:3333"]
+
+volumes:
+  pgdata:

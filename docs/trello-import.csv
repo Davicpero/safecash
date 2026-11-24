@@ -1,0 +1,31 @@
+Etapa,Trilha,Cartão,Descrição,Critério de aceite
+1,Backend,Iniciar projeto Node,"npm init, Express 5, scripts dev/start/test",GET /api/health responde 200
+1,Frontend,Iniciar projeto React com Vite,"npm create vite, React Router, estrutura src/",Tela inicial abre em localhost:5173
+1,Gestão,Levantar requisitos funcionais e não funcionais,"RF, RNF e regras de negócio em docs/01-requisitos.md",Documento revisado pelo grupo
+2,Backend,Arquitetura de pastas,"config, database, middlewares, modules, utils",docs/02-arquitetura.md com diagrama
+2,Frontend,Criar a logo,"Logo SVG + favicon",Logo aparece no login e na sidebar
+2,Gestão,Organizar tarefas no Trello,"Importar este CSV, definir responsáveis",Quadro com todos os cartões e responsáveis
+3,Backend,"Rotas GET, POST, PUT e DELETE (soft)","Migrations users, transactions, audit_logs; CRUD com auditoria",Swagger cria/lista/edita/exclui; registro excluído continua no banco
+3,Frontend,"Consumir rotas de leitura, gravação, atualização e exclusão","Tabela, formulário, modal de confirmação",Lançar R$ 2.000 de aluguel aparece na lista
+4,Backend,Autenticação JWT,"/auth/login, /auth/me, bcrypt, auditoria de login",Senha errada retorna 401 genérico
+4,Frontend,Tela de login com autenticação,"AuthContext, token salvo, logout, sessão expirada",Recarregar a página mantém o login
+4,Gestão,Validação do fluxo de dados e endpoints,"Testar cada rota no Swagger e anotar problemas",Checklist preenchido
+5,Backend,Rotas protegidas e middlewares,"authenticate, authorize (RBAC), validate (Zod)",Auditor recebe 403 em POST /transactions
+5,Frontend,Criação do dashboard,"Layout, cartões de saldo, menu responsivo",Dashboard abre após login
+5,Gestão,Critérios de segurança e RBAC,"Matriz de permissões em docs/05-seguranca-rbac.md",Matriz aprovada pelo grupo
+6,Backend,Rotas do dashboard e agregações,"summary, monthly, categories, SSE /events",Saldo bate com soma manual
+6,Frontend,Consumo do dashboard e gráficos,"Gráfico mensal, categorias, últimos lançamentos",Saldo atualiza sozinho em outra aba
+6,Gestão,Validação dos fluxos de navegação,"Percorrer todas as telas com os 3 perfis",Nenhum link quebrado
+7,Backend,"Filtros, paginação e busca","search, type, category, from, to, status, sort",Página 2 não repete itens da página 1
+7,Frontend,"Componentização de tabela, busca e filtros","TransactionTable, TransactionFilters, Pagination, debounce",Digitar na busca não dispara uma requisição por letra
+7,Gestão,Modelagem de desempenho das consultas,"EXPLAIN das consultas principais em docs/06-desempenho.md",Consultas usam índice
+8,Backend,Tratamento centralizado de erros,"errorHandler, AppError, códigos estáveis",Todo erro tem code e requestId
+8,Frontend,"Feedbacks: toasts, loaders e modais de erro","sonner, skeleton, ErrorBoundary, erros por campo",Valor negativo mostra erro embaixo do campo
+8,Gestão,Homologação de usabilidade (UX/UI),"Checklist de UX em docs/07-testes.md",Checklist 100% marcado
+9,Backend,"Otimização do banco, índices e relatórios","Migration de índices, CSV, idempotência",CSV abre no Excel com acentos
+9,Frontend,"Otimização de renderização, memoização e responsividade","React.memo, useMemo, lazy por tela",Lighthouse mobile sem erros graves
+9,Gestão,Estratégia de testes (unitários e e2e),"Vitest + Supertest + Playwright",npm test e npm run test:e2e verdes
+10,Backend,Build de produção,"Dockerfile, render.yaml, PostgreSQL",API pública responde /api/health
+10,Frontend,Deploy do frontend,"Vercel ou Netlify com VITE_API_URL",Site público faz login
+10,Gestão,"Documentação final da API (Swagger) e handover","README, Swagger, docs/08-deploy.md",Outra turma consegue rodar só lendo o README
+11,Gestão,Gravar vídeo da aplicação e publicar no GitHub,"Roteiro em docs/09-roteiro-video.md",Link do vídeo no README
